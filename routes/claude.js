@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 
+const MAX_OUTPUT_TOKENS = 8000;
+
 router.post('/', async (req, res) => {
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_KEY) {
@@ -9,12 +11,17 @@ router.post('/', async (req, res) => {
 
   try {
     const { model, max_tokens, messages } = req.body;
-    const safeMaxTokens = Math.min(max_tokens || 1000, 6000);
 
+    // Control de costos: cada llamada máximo 4000 tokens (dos llamadas = ~$0.12 max)
+    const safeMaxTokens = Math.min(max_tokens || 1000, MAX_OUTPUT_TOKENS);
+
+    // Log de request
     console.log(JSON.stringify({
       timestamp: new Date().toISOString(),
       action: 'claude_request',
-      max_tokens: safeMaxTokens
+      model: model || 'claude-sonnet-4-20250514',
+      max_tokens: safeMaxTokens,
+      estimated_max_cost_usd: (safeMaxTokens / 1000000 * 15).toFixed(4)
     }));
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -27,15 +34,16 @@ router.post('/', async (req, res) => {
       body: JSON.stringify({
         model: model || 'claude-sonnet-4-20250514',
         max_tokens: safeMaxTokens,
-        messages: messages
+        messages
       })
     });
 
     const data = await response.json();
 
+    // Log de uso real
     if (data.usage) {
-      var inputCost = data.usage.input_tokens / 1000000 * 3;
-      var outputCost = data.usage.output_tokens / 1000000 * 15;
+      const inputCost = data.usage.input_tokens / 1000000 * 3;
+      const outputCost = data.usage.output_tokens / 1000000 * 15;
       console.log(JSON.stringify({
         timestamp: new Date().toISOString(),
         action: 'claude_response',
@@ -50,6 +58,7 @@ router.post('/', async (req, res) => {
     }
 
     res.json(data);
+
   } catch (error) {
     console.error('Claude error:', error.message);
     res.status(500).json({ error: error.message });
